@@ -1,0 +1,74 @@
+- name: Get MongoDb
+  become: true
+  shell:
+    cmd: |
+      /usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
+  args:
+    warn: false
+
+- name: install "{{ packages.mac }}"
+  become: true
+  homebrew:
+    name: "{{ packages.mac }}"
+    state: latest
+
+- name: Start MongoDb
+  become: true
+  shell:
+    cmd: |
+      mkdir -p data/db
+      mongod --dbpath data/db
+  args:
+    warn: false
+
+- name: Get TUN/TAP driver
+  become: true
+  get_url:
+    url: http://downloads.sourceforge.net/tuntaposx/tuntap_20150118.tar.gz
+    dest: ~/
+
+- name: Install TUN/TAP driver
+  become: true
+  shell:
+    cmd: |
+      cd ~
+      tar xzf tuntap_20150118.tar.gz
+      cd tuntap_20150118
+      installer -pkg ./tuntap_20150118.pkg -target ~/
+  args:
+    warn: false
+
+- name: Setup network
+  become: true
+  shell:
+    cmd: |
+      ifconfig lo0 alias 127.0.0.2 netmask 255.255.255.255
+      ifconfig lo0 alias 127.0.0.3 netmask 255.255.255.255
+      ifconfig lo0 alias 127.0.0.4 netmask 255.255.255.255
+      ifconfig lo0 alias 127.0.0.5 netmask 255.255.255.255
+  args:
+    warn: false
+
+- name: Enable IP forwarding & Masquerading
+  become: true
+  shell:
+    cmd: |
+      sysctl -w net.inet.ip.forwarding=1
+      sh -c "echo 'nat on {en0} from 45.45.0.0/16 to any -> {en0}' > /etc/pf.anchors/org.nextepc"
+      pfctl -e -f /etc/pf.anchors/org.nextepc
+  args:
+    warn: false
+
+- name: Compile nextEPC
+  become_user: nobody
+  shell: |
+    mkdir ~/acetcom
+    cd ~/acetcom
+    git clone https://github.com/acetcom/nextepc 
+    cd nextepc
+    autoreconf -iv
+    ./configure --prefix=`pwd`/install
+    make -j `nproc`
+    make install
+  args:
+    warn: false

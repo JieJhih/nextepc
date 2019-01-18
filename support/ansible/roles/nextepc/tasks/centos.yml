@@ -1,0 +1,95 @@
+- name: Create the MongoDB repository file
+  become: true
+  shell: |
+      sh -c "cat << 'EOF' > /etc/yum.repos.d/mongodb-org-3.4.repo
+      [mongodb-org-3.4]
+      name=MongoDB Repository
+      baseurl=https://repo.mongodb.org/yum/redhat/\$releasever/mongodb-org/3.4/x86_64/
+      gpgcheck=1
+      enabled=1
+      gpgkey=https://www.mongodb.org/static/pgp/server-3.4.asc
+      EOF"
+  args:
+    warn: false
+
+
+- name: install "{{ packages.centos }}" if not exist
+  become: true
+  yum:
+    name: "{{ packages.centos }}"
+    state: latest
+
+- name: install mongo-c-driver-devel if not exist
+  become: true
+  yum:
+    name: mongo-c-driver-devel
+    state: latest
+
+- name: Start MongoDb
+  become: true
+  shell:
+    cmd: |
+      systemctl start mongod
+  args:
+    warn: false
+
+- name: Add pgwtun
+  become: true
+  shell:
+    cmd: |
+      ip tuntap add name pgwtun mode tun
+  args:
+    warn: false
+
+- name: Enable pgwtun ipv6
+  become: true
+  command: sysctl -n net.ipv6.conf.pgwtun.disable_ipv6
+  args:
+    warn: false
+  ignore_errors: yes
+  register: ipv6_status
+
+- name: ipv6_status
+  become: true
+  shell:
+    cmd: |
+      sh -c "echo 'net.ipv6.conf.pgwtun.disable_ipv6=0' > /etc/sysctl.d/30-nextepc.conf"
+  args:
+    warn: false
+  when: ipv6_status != 0
+
+- name: ipv6_status
+  become: true
+  shell: sysctl -p /etc/sysctl.d/30-nextepc.conf
+  args:
+    warn: false
+  when: ipv6_status != 0
+
+- name: Add IP address
+  become: true
+  shell:
+    cmd: |
+      ip addr add 45.45.0.1/16 dev pgwtun
+      ip addr add cafe::1/64 dev pgwtun
+  args:
+    warn: false
+
+- name: Enable TUN device
+  become: true
+  shell: ip link set pgwtun up
+  args:
+    warn: false
+
+- name: Compile nextEPC
+  become_user: nobody
+  shell: |
+    mkdir ~/acetcom
+    cd ~/acetcom
+    git clone https://github.com/acetcom/nextepc 
+    cd nextepc
+    autoreconf -iv
+    ./configure --prefix=`pwd`/install
+    make -j `nproc`
+    make install
+  args:
+    warn: false

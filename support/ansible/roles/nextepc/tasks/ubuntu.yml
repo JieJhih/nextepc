@@ -1,0 +1,106 @@
+- name: Install packages
+  become: true
+  apt:
+      name: "{{ packages.ubuntu }}"
+      state: present
+
+- name: Start Mongodb
+  become: true
+  shell: service mongodb restart
+  args:
+    warn: false
+
+- name: udev
+  become: true
+  shell: service udev restart
+  args:
+    warn: false
+
+- name: Write the configuration file
+  become: true
+  shell:
+    cmd: |
+      sh -c "cat << EOF > /etc/systemd/network/99-nextepc.netdev
+      [NetDev]
+      Name=pgwtun
+      Kind=tun
+      EOF"
+  args:
+    warn: false
+
+- name: Load the configuration file
+  become: true
+  shell:
+    cmd: |
+      systemctl enable systemd-networkd
+  args:
+    warn: false
+
+- name: Start the configuration file
+  become: true
+  shell:
+    cmd: |
+      systemctl restart systemd-networkd
+  args:
+    warn: false
+
+- name: Enable pgwtun ipv6
+  become: true
+  command: sysctl -n net.ipv6.conf.pgwtun.disable_ipv6
+  args:
+    warn: false
+  ignore_errors: yes
+  register: ipv6_status
+
+- name: ipv6_status
+  become: true
+  shell:
+    cmd: |
+      sh -c 'echo 'net.ipv6.conf.pgwtun.disable_ipv6=0' > /etc/sysctl.d/30-nextepc.conf'
+  args:
+    warn: false
+  when: ipv6_status != 0
+
+- name: ipv6_status
+  become: true
+  shell: sysctl -p /etc/sysctl.d/30-nextepc.conf
+  args:
+    warn: false
+  when: ipv6_status != 0
+
+- name: Set ip address on tun device
+  become: true
+  shell:
+    cmd: |
+      sh -c "cat << EOF > /etc/systemd/network/99-nextepc.network
+      [Match]
+      Name=pgwtun
+      [Network]
+      Address=45.45.0.1/16
+      Address=cafe::1/64
+      EOF"
+  args:
+    warn: false
+
+- name: Restart Network
+  become: true
+  shell:
+    cmd: |
+      systemctl restart systemd-networkd
+  args:
+    warn: false
+
+
+- name: Compile nextEPC
+  become_user: nobody
+  shell: |
+    mkdir ~/acetcom
+    cd ~/acetcom
+    git clone https://github.com/acetcom/nextepc 
+    cd nextepc
+    autoreconf -iv
+    ./configure --prefix=`pwd`/install
+    make -j `nproc`
+    make install
+  args:
+    warn: false

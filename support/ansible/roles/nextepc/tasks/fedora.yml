@@ -1,0 +1,81 @@
+- name: install "{{ packages.fedora }}"
+  become: true
+  dnf:
+    name: "{{ packages.fedora }}"
+    state: latest
+
+- name: Start MongoDb
+  become: true
+  shell:
+    cmd: |
+      mkdir -p data/db
+      mongod --dbpath data/db
+  args:
+    warn: false
+
+- name: Start udev
+  become: true
+  shell: systemctl start systemd-udevd
+  args:
+    warn: false
+
+- name: Add pgwtun
+  become: true
+  shell:
+    cmd: |
+      ip tuntap add name pgwtun mode tun
+  args:
+    warn: false
+
+- name: Enable pgwtun ipv6
+  become: true
+  command: sysctl -n net.ipv6.conf.pgwtun.disable_ipv6
+  args:
+    warn: false
+  ignore_errors: yes
+  register: ipv6_status
+
+- name: ipv6_status
+  become: true
+  shell:
+    cmd: |
+      sh -c "echo 'net.ipv6.conf.pgwtun.disable_ipv6=0' > /etc/sysctl.d/30-nextepc.conf"
+  args:
+    warn: false
+  when: ipv6_status != 0
+
+- name: ipv6_status
+  become: true
+  shell: sysctl -p /etc/sysctl.d/30-nextepc.conf
+  args:
+    warn: false
+  when: ipv6_status != 0
+
+- name: Add IP address
+  become: true
+  shell:
+    cmd: |
+      ip addr add 45.45.0.1/16 dev pgwtun
+      ip addr add cafe::1/64 dev pgwtun
+  args:
+    warn: false
+
+- name: Enable TUN device
+  become: true
+  shell: ip link set pgwtun up
+  args:
+    warn: false
+
+- name: Compile nextEPC
+  become_user: nobody
+  shell: |
+    mkdir ~/acetcom
+    cd ~/acetcom
+    git clone https://github.com/acetcom/nextepc 
+    cd nextepc
+    autoreconf -iv
+    ./configure --prefix=`pwd`/install
+    make -j `nproc`
+    make install
+  args:
+    warn: false

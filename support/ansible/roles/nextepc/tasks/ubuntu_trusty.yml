@@ -1,0 +1,109 @@
+- name: Install packages
+  become: true
+  apt:
+      name: "{{ packages.ubuntu_trusty }}"
+      state: present
+      update_cache: yes
+
+- name: Start Mongodb
+  become: true
+  shell: service mongodb restart
+  args:
+    warn: false
+
+- name: udev
+  become: true
+  shell: service udev restart
+  args:
+    warn: false
+
+- name: Write the configuration file
+  become: true
+  shell:
+    cmd: |
+      sh -c "cat << EOF > /etc/network/interfaces.d/nextepc
+      auto pgwtun
+      iface pgwtun inet static
+          address 45.45.0.1
+          netmask 255.255.0.0
+          pre-up ip tuntap add name pgwtun mode tun
+          post-down ip tuntap del name pgwtun mode tun
+      iface pgwtun inet6 static
+          address cafe::1
+          netmask 64
+      EOF"
+  args:
+    warn: false
+
+- name: Load the configuration file
+  become: true
+  shell:
+    cmd: |
+      sh -c 'if ! grep "source-directory" /etc/network/interfaces | grep "/etc/network/interfaces.d" > /dev/null; then
+      echo "source-directory /etc/network/interfaces.d" >> /etc/network/interfaces
+      fi'
+  args:
+    warn: false
+
+- name: Create Tun device
+  become: true
+  command: ifup pgwtun
+  args:
+    warn: false
+
+- name: Enable pgwtun ipv6
+  become: true
+  command: sysctl -n net.ipv6.conf.pgwtun.disable_ipv6
+  args:
+    warn: false
+  ignore_errors: yes
+  register: ipv6_status
+
+- name: ipv6_status
+  become: true
+  shell:
+    cmd: |
+      sh -c 'echo 'net.ipv6.conf.pgwtun.disable_ipv6=0' > /etc/sysctl.d/30-nextepc.conf'
+  args:
+    warn: false
+  when: ipv6_status != 0
+
+- name: ipv6_status
+  become: true
+  shell: sysctl -p /etc/sysctl.d/30-nextepc.conf
+  args:
+    warn: false
+  when: ipv6_status != 0
+
+- name: Get Mongo C driver
+  become: true
+  get_url:
+    url: https://github.com/mongodb/mongo-c-driver/releases/download/1.8.0/mongo-c-driver-1.8.0.tar.gz
+    dest: /etc/
+
+- name: Install Mongo C driver
+  become: true
+  shell: |
+    cd /etc
+    tar xzf mongo-c-driver-1.8.0.tar.gz
+    cd mongo-c-driver-1.8.0
+    ./configure --disable-automatic-init-and-cleanup
+    make
+    make install
+    ldconfig
+  args:
+    warn: false
+
+- name: Compile nextEPC
+  become_user: nobody
+  shell: |
+    mkdir ~/acetcom
+    cd ~/acetcom
+    git clone https://github.com/acetcom/nextepc 
+    cd nextepc
+    autoreconf -iv
+    ./configure --prefix=`pwd`/install
+    make -j `nproc`
+    make install
+  args:
+    warn: false
